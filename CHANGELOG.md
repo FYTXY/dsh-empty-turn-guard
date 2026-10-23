@@ -2,6 +2,12 @@
 
 本项目的所有重要变更都记录在这里。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 变更
+
+- **README 安装章节调整顺序**：把「从 GitHub 安装」提到第一位（当前唯一可用的一键方式），npm 那条明确标注"尚未发布，现在会报 E404"。包本身还没发到 npm，文档先与现状对齐；发布成功后把 npm 挪回第一位即可。
+
 ## [0.4.0] — 2026-10-24
 
 ### 新增

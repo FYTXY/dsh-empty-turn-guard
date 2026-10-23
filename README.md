@@ -33,14 +33,14 @@ without touching any DSH file.
 ## Install
 
 ```sh
-# from npm (once published)
-dsh plugin --profile <your-profile> add dsh-empty-turn-guard
-
-# straight from GitHub
+# straight from GitHub (works today)
 dsh plugin --profile <your-profile> add github:FYTXY/dsh-empty-turn-guard
 
 # from a local checkout, for development
 dsh plugin --profile <your-profile> add link:/absolute/path/to/dsh-empty-turn-guard
+
+# from npm — not published yet, this line will fail with E404 for now
+dsh plugin --profile <your-profile> add dsh-empty-turn-guard
 ```
 
 `dsh plugin … add` forwards its arguments to pnpm, so GitHub shorthands, tags and
@@ -71,7 +71,7 @@ New-Item -ItemType Junction -Path ".\node_modules\@deepseek-ai\schemastery" `
   -Target "$env:USERPROFILE\.dsh\profiles\<profile>\node_modules\@deepseek-ai\schemastery"
 ```
 
-An npm or GitHub install handles this through pnpm and needs no extra step.
+A GitHub install handles this through pnpm and needs no extra step.
 
 </details>
 

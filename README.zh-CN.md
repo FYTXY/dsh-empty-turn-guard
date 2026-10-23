@@ -18,14 +18,14 @@
 ## 安装
 
 ```sh
-# 从 npm 安装（发布后可用）
-dsh plugin --profile <你的profile> add dsh-empty-turn-guard
-
-# 直接从 GitHub 装
+# 直接从 GitHub 装（现在就能用）
 dsh plugin --profile <你的profile> add github:FYTXY/dsh-empty-turn-guard
 
 # 从本地源码 link 安装（自己开发用）
 dsh plugin --profile <你的profile> add link:<本目录绝对路径>
+
+# 从 npm 装——尚未发布，这条现在会报 E404
+dsh plugin --profile <你的profile> add dsh-empty-turn-guard
 ```
 
 `dsh plugin … add` 会把参数转给 pnpm，所以 GitHub 简写、tag、分支都能用（例如 `github:FYTXY/dsh-empty-turn-guard#v0.4.0`）。
@@ -49,7 +49,7 @@ New-Item -ItemType Junction -Path ".\node_modules\@deepseek-ai\schemastery" `
   -Target "$env:USERPROFILE\.dsh\profiles\<profile>\node_modules\@deepseek-ai\schemastery"
 ```
 
-从 npm / GitHub 正常安装时 pnpm 会自己处理，不用这一步。
+从 GitHub 正常安装时 pnpm 会自己处理，不用这一步。
 
 </details>
 
