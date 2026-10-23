@@ -1,0 +1,80 @@
+{
+  "name": "dsh-empty-turn-guard",
+  "version": "0.3.1",
+  "description": "DSH 插件：把「只有协议标记、既没有正文也没有工具调用」的空回合改判成可重试的错误，避免模型回复输出一半就静默停住。A DSH plugin that turns a markup-only empty turn into a retryable EMPTY_RESPONSE error instead of a silently half-finished reply.",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek",
+    "dsh-bundle",
+    "retry",
+    "empty-response",
+    "relay",
+    "ai-agent"
+  ],
+  "homepage": "https://github.com/FYTXY/dsh-empty-turn-guard#readme",
+  "bugs": {
+    "url": "https://github.com/FYTXY/dsh-empty-turn-guard/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FYTXY/dsh-empty-turn-guard.git"
+  },
+  "author": "FYTXY",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "README.en.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "peerDependencies": {
+    "cordis": "^4.0.0-rc.10"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.4"
+  },
+  "peerDependenciesMeta": {
+    "cordis": {
+      "optional": true
+    }
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
+      ]
+    },
+    "compatibility": {
+      "dshReleases": {
+        "0.2.0-rc.2": "compatible"
+      }
+    }
+  },
+  "scripts": {
+    "check": "node --check lib/index.js && node --check lib/client.js"
+  }
+}

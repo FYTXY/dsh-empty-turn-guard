@@ -1,0 +1,19 @@
+# Dependencies
+#
+# This package resolves @deepseek-ai/schemastery through a junction that points at
+# the DSH profile's own copy, because the package physically lives outside that
+# profile. That link is a local install detail and must never be committed.
+node_modules/
+
+# Packaging artefacts
+*.tgz
+*.tar.gz
+
+# Local probes and scratch scripts used while debugging the plugin
+.probe*
+scratch/
+
+# Logs and OS noise
+*.log
+.DS_Store
+Thumbs.db

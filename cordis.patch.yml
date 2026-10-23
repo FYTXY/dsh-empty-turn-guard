@@ -1,0 +1,24 @@
+# ============================================================================
+# dsh-empty-turn-guard 的 bundle patch —— 把守卫插件挂进 DSH 配置树
+# ============================================================================
+#
+# 【这是什么】
+#   这是本插件的"挂载声明"。DSH 启动时按 bundle 层栈把各个包的 patch
+#   叠起来组成配置树；这个文件就是本插件贡献的那一层。
+#
+# 【为什么用 bundle patch 而不是裸路径行】
+#   1. 作为 profile 的 bundle 被选中（package.json 的 dsh.profile.bundles），
+#      设置 → 插件 里就会出现本插件的卡片和一个「启用 / 停用」开关，
+#      开关直接改写 dsh.profile.bundles，不需要手工编辑 YAML。
+#   2. 别人安装只需 `dsh plugin --profile <profile> add dsh-empty-turn-guard`。
+#
+# 【约定】
+#   - id 必须全局唯一，且与包名一致（DSH STORE 上架契约按 entryId 比对）。
+#   - `id:` 那一行不能写行尾注释：商城预检用正则抓该行的值，行尾注释会让它
+#     抓不到 entry ID，整份提交被判 SUBMISSION_ENTRY_MISSING。
+#   - name 写包名即可，DSH 会解析到本包的入口 lib/index.js。
+# ============================================================================
+
+- insert:
+    - id: dsh-empty-turn-guard
+      name: 'dsh-empty-turn-guard'
