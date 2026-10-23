@@ -2,6 +2,28 @@
 
 本项目的所有重要变更都记录在这里。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.4.0] — 2026-10-24
+
+### 新增
+
+- **正式测试套件 `tests/`**（`node:test`，无第三方依赖，47 个用例）：
+  - `tests/guard.test.mjs`：覆盖宿主半的判定表 —— 8 种残渣形态都要改写成 `EMPTY_RESPONSE`，8 种真实回复（含单词回答、单个 `?`、正文里提到标签）都必须原样放行，以及 `max-tokens`、无 `tools` 的后台调用、开关的三种形态（挂载时关闭 / volatile 活引用 / 普通对象中途切换）。
+  - `tests/client-bundle.test.mjs`：用假的 `__ModuleLoader__` 与最小 React 桩加载 `lib/client.js`，断言两个槽位注册、注入面、`SettingsForm` + 开关渲染、开关暂存布尔、只读态锁定、缺少 hook 时不渲染。
+- **`docs/root-cause.md`**：把这个插件针对的失败形态写成文档 —— 四层因果链、逐行代码位置、4573 条消息的实测统计、换协议为什么不管用、以及上游真正该修的三个点。
+- **`CONTRIBUTING.md` / `SECURITY.md`**：评审标准、兼容性约束（row id、volatile、peer 依赖），以及插件的安全边界（只改一个 `finish` 分块、无网络/文件/进程访问、日志不写正文）。
+- **`.editorconfig`**、**`.gitattributes`**、**`.github/workflows/tests.yml`**（Linux / Windows × Node 22 / 24，跑 `npm run check` 与 `npm test`）。
+
+### 变更
+
+- **README 重组**：`README.md` 改为英文主文档（Features / Install / Configuration / How it works / Compatibility / Non-goals / Development / Repository Layout / License），中文版移到 `README.zh-CN.md` 并双向链接；删除 `README.en.md`。
+- `@deepseek-ai/schemastery` 从 `dependencies` 改为 **`peerDependencies`**（由 DSH 提供，避免第二份副本），同时列入 `devDependencies` 供测试与 CI 解析。
+- 移除未使用的 `cordis` 可选 peer 声明：本插件不 import cordis。
+- `files` 增加 `docs`、`README.zh-CN.md`，移除 `README.en.md`；`scripts` 增加 `test`。
+
+### 不变
+
+- 拦截逻辑与客户端半行为完全未改，仅补充测试与文档。
+
 ## [0.3.1] — 2026-10-24
 
 ### 修复

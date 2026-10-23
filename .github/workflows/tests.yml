@@ -1,0 +1,34 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node-version: ["22", "24"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      # The plugin's only runtime dependency is a peer hosted by DSH. Installing
+      # the peer as a dev dependency gives CI a concrete copy to link against.
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Syntax check both entry points
+        run: npm run check
+
+      - name: Test
+        run: npm test

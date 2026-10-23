@@ -1,111 +1,104 @@
 # dsh-empty-turn-guard
 
-**中文** | [English](./README.en.md)
+**English** | [简体中文](./README.zh-CN.md)
 
-给 [DSH（DeepSeek Harness）](https://github.com/deepseek-ai) 用的一个小插件：当模型回复**只剩协议残渣、既没有正文也没有工具调用**的时候，把它改判成一个**可重试的错误**，而不是当成"正常说完了"。
+A small [DSH (DeepSeek-Harness)](https://github.com/deepseek-ai) plugin for one
+specific failure: the model replies with **nothing but leaked protocol markup** —
+no prose, no tool call — and the harness treats that as a finished turn. This
+plugin reclassifies it as a **retryable error** so the step is retried instead of
+silently ending the turn.
 
-装上以后，你有**两个**开关入口：
+It is a DSH **bundle** (a package with its own `cordis.patch.yml`) and installs
+without touching any DSH file.
 
-- **设置 → 内置插件 →「空回合守卫」**：一个独立 tab，带开关、说明与保存/丢弃。
-- **侧边栏 →「插件」面板**：同名卡片，同一份开关（改的是 `dsh.profile.bundles`）。
+## Features
 
----
+- **Catches the "half an answer" turn.** When a reply ends with only
+  `</｜｜DSML｜｜ calls>`, `<thinking> </thinking>`, or leftover punctuation, the
+  step is retried with backoff instead of being committed as an answer.
+- **Two settings entry points.** A dedicated tab under **Settings → Built-in
+  plugins → Empty-turn guard**, and the same card on the sidebar **Plugins**
+  panel. Both drive the same switch.
+- **Cannot false-positive on real replies.** Three conditions must hold at once:
+  the finish is `stop`, no tool call was observed, and the text is empty after
+  markup removal. A one-word answer, a lone `?`, or prose that merely mentions a
+  tag passes through untouched.
+- **Leaves truncation alone.** `max-tokens` is a real answer cut short and already
+  surfaces as its own visible outcome, so it is not touched.
+- **No dependencies at runtime.** Host half imports only a schema library; the
+  browser half is a hand-written bundle with no build step.
+- **Logs the length, never the text.** Diagnostics carry `text=24ch`, so model
+  output does not reach log files through this plugin.
 
-## 它解决什么
+## Install
 
-现象：AI 回复输出到一半就停住，气泡里可能是
+```sh
+# from npm (once published)
+dsh plugin --profile <your-profile> add dsh-empty-turn-guard
 
-- 一句没说完的话，
-- 或者只有 `</｜｜DSML｜｜ parameter>` `</｜｜DSML｜｜ invoke>` `</｜｜DSML｜｜ calls>` 这类标记，
-- 或者只有 `<thinking> </thinking>` 空标签，
+# straight from GitHub
+dsh plugin --profile <your-profile> add github:FYTXY/dsh-empty-turn-guard
 
-然后下面出现一个「继续」按钮。点继续，模型才接着干——但那一步本来要做的事已经丢了。
-
-根因（不是 DSH 崩溃，是"空回合被判定为正常完成"）：
-
-1. 中转站把模型**原生的工具调用标记**当纯文本塞回正文，然后照发一个正常的 `stop`。DSH 里没有任何代码认识 `｜｜DSML｜｜` 或 `<thinking>`，只能当正文渲染。
-2. `@deepseek-ai/dsh-agent-loop` 判断一轮是否结束时**只看有没有工具调用**：`toolCalls.length === 0 → { kind: "completed" }`。
-3. `@deepseek-ai/dsh-llm-pi-ai` 的空内容护栏只检查**内容块数量**：`message.content.length === 0`。残渣块数 = 1，护栏直接放行。
-
-于是「只有一个残渣块」被当成完整回复落盘，UI 如实显示"已完成" + 「继续」。
-
-本插件在 `llm/stream` 瀑布上包一层，统计这次尝试到底产出了什么；当 `stop` 同时满足下面三条时，把结束原因改写成 `EMPTY_RESPONSE` 错误：
-
-1. 结束原因是 `stop`（不是 `max-tokens`）；
-2. 整个尝试没有任何工具调用；
-3. 把正文里的协议残渣（`｜｜DSML｜｜` 标记、`<thinking>`/`</thinking>`、`<返璞归真>`）和空白全部去掉后，**什么都不剩**。
-
-`EMPTY_RESPONSE` 在 DSH 默认的可重试集合里，所以 `@deepseek-ai/dsh-llm-retry` 会**自动带退避重试**这一步（默认最多 5 次）。重试成功后你根本不会察觉；连续失败才会看到明确的错误，而不是一个假装成功的半截回复。
-
----
-
-## 安装
-
-### 方式一：从 npm 安装（推荐给别人用）
-
-```bash
-dsh plugin --profile <你的profile> add dsh-empty-turn-guard
+# from a local checkout, for development
+dsh plugin --profile <your-profile> add link:/absolute/path/to/dsh-empty-turn-guard
 ```
 
-装完打开 DSH，进 **设置 → 内置插件 →「空回合守卫」**（或侧边栏 **「插件」** 面板），把开关打开。
+`dsh plugin … add` forwards its arguments to pnpm, so GitHub shorthands, tags and
+branches work too (`github:FYTXY/dsh-empty-turn-guard#v0.4.0`).
 
-### 方式二：直接从 GitHub 装（还没发 npm 时用这个）
+Restart DSH, then open **Settings → Built-in plugins → Empty-turn guard** and
+turn the switch on.
 
-```bash
-dsh plugin --profile <你的profile> add github:FYTXY/dsh-empty-turn-guard
+<details>
+<summary>Installing without the CLI</summary>
+
+1. Put this directory somewhere stable, e.g. `~/.dsh/plugins/dsh-empty-turn-guard`.
+2. Link it into the profile's `node_modules` (symlink or Windows junction).
+3. In the profile's `package.json`, add the package name to **both**
+   `dependencies` and the `dsh.profile.bundles` array.
+4. Restart DSH.
+
+Do not insert a bare path row into `cordis.patch.yml` instead: that mounts the
+plugin as a plain module rather than a bundle, and the settings card will not
+appear.
+
+With a `link:` or manual install, `@deepseek-ai/schemastery` resolves from the
+copy DSH already ships. If Node reports `ERR_MODULE_NOT_FOUND:
+@deepseek-ai/schemastery`, point at that copy:
+
+```powershell
+New-Item -ItemType Junction -Path ".\node_modules\@deepseek-ai\schemastery" `
+  -Target "$env:USERPROFILE\.dsh\profiles\<profile>\node_modules\@deepseek-ai\schemastery"
 ```
 
-`dsh plugin ... add` 只是把参数转给 pnpm，所以 pnpm 支持的 GitHub 简写、`git+https://...`、tag/分支都能用（例如 `github:FYTXY/dsh-empty-turn-guard#v0.3.1`）。
+An npm or GitHub install handles this through pnpm and needs no extra step.
 
-### 方式三：从本地源码 link 安装（自己开发用）
+</details>
 
-```bash
-git clone https://github.com/FYTXY/dsh-empty-turn-guard.git dsh-empty-turn-guard
-dsh plugin --profile <你的profile> add link:<上面目录的绝对路径>
-```
+## Configuration
 
-### 方式四：完全手工（不想用 CLI）
+### 1. The switch
 
-1. 把本目录放到任意位置，例如 `~/.dsh/plugins/dsh-empty-turn-guard`。
-2. 在 profile 的 `node_modules` 里建一个软链/ junction 指向它；
-3. 在 profile 的 `package.json` 里：
-   - 把包名加进 `dependencies`；
-   - 把包名加进 `dsh.profile.bundles` 数组。
-4. 重启 DSH。
+Both entry points write the same value — the package's entry in the profile's
+`dsh.profile.bundles` array — so either works:
 
-> 不要用"往 `cordis.patch.yml` 里插一行裸路径"的老办法——那样它不会被当成 bundle，**设置里也就没有那个开关**。
+| Entry point | What it shows |
+| --- | --- |
+| Settings → Built-in plugins → **Empty-turn guard** | The plugin's own tab: the switch, what it currently does, and save / discard |
+| Sidebar → **Plugins** panel | The same switch on the bundle's card |
 
-> 用 link / 手工方式安装时，本包依赖的 `@deepseek-ai/schemastery` 要从 profile 已有的那份解析。如果 node 报 `ERR_MODULE_NOT_FOUND: @deepseek-ai/schemastery`，在本包目录里建一个 junction 指过去：
->
-> ```powershell
-> New-Item -ItemType Junction -Path ".\node_modules\@deepseek-ai\schemastery" `
->   -Target "$env:USERPROFILE\.dsh\profiles\<profile>\node_modules\@deepseek-ai\schemastery"
-> ```
->
-> 从 npm / GitHub 正常安装时 pnpm 会自己装好依赖，不用管这一步。
+Turning it **off** unloads the plugin and restores the untouched `llm/stream`
+chain, which brings the silent half-turn back. Turning it **on** reloads the
+guard. Both take effect without reinstalling.
 
----
+The row-level toggle for this plugin's row is greyed out on the Plugins panel.
+That is expected: DSH only enables or disables *rows* through the profile's own
+patch file, and this plugin's row comes from the bundle's own `cordis.patch.yml`.
+The bundle switch is the one that takes effect.
 
-## 在设置里启用 / 停用
+### 2. Disabling it without unloading
 
-有两个入口，改的是同一件事（profile `package.json` 的 `dsh.profile.bundles`），热生效、不需要卸载：
-
-**入口一：设置 → 内置插件 →「空回合守卫」**
-
-这是插件自带的配置页（客户端半 `lib/client.js` 注册到 `settings.plugins.tab`）。里面有开关、当前状态说明，以及保存 / 丢弃。
-
-**入口二：侧边栏 →「插件」面板**
-
-DSH 的插件管理页会列出每个被选中的 bundle，并给一个开关。本插件在列表里是一条卡片。
-
-两处开关的效果一样：
-
-- **关掉**：本插件不再加载，`llm/stream` 恢复原样（空回合又会静默完成）。
-- **打开**：重新加载，恢复守卫。
-
-> 说明：插件面板里本插件那一**行**的开关是灰色的。这是正常的——DSH 只允许通过 profile 自己的 patch 文件来启停"行"，而本插件的行是由包自带的 `cordis.patch.yml` 提供的，所以行的开关锁定，真正生效的是**包的开关**。
-
-如果你还想在配置层面单独禁用它（例如临时保留包但跳过逻辑），也可以给这一行加 `config`：
+To keep the package installed but skip the interception, give the row a config:
 
 ```yaml
 - id: dsh-empty-turn-guard
@@ -114,73 +107,129 @@ DSH 的插件管理页会列出每个被选中的 bundle，并给一个开关。
     enabled: false
 ```
 
-`enabled: false` 时插件照常加载但直接返回，不做任何拦截；在设置页拨开关则**无需重启**，下一次模型请求即生效（`enabled` 是 volatile 字段，运行时是活引用，插件每次请求都会重读）。
+`enabled` is a volatile field, so it arrives as a live reference rather than a
+frozen value; the guard re-reads it on every request and the settings switch
+applies to the next model call with no restart.
 
-> 自己写这类"带表单的设置项"时有个坑值得记一笔：`Config` 的字段必须带 `.volatile()`（如 `z.boolean().default(true).volatile()`）。`@deepseek-ai/dsh-settings` 会用 `volatileForm(schema)` 过滤 schema，只保留 volatile 字段；一个都没有时整条插件被跳过，于是**设置里静默什么都不出现**——宿主不报错、插件也正常挂载，非常难查。官方 `dsh-agent-loop`、`dsh-agent-default-model` 都这么写。
+### 3. Verifying it is running
 
----
-
-## 怎么确认它生效了
-
-宿主日志（`%APPDATA%\DSH Desktop\logs\host\dsh-<日期>.log`）里会出现：
-
-```
-[empty-turn-guard] empty-turn-guard: mounted (markup-only stops become EMPTY_RESPONSE retries)
-```
-
-真的拦到一次空回合时：
+In the host log (`%APPDATA%\DSH Desktop\logs\host\dsh-<date>.log` on Windows,
+`~/.config/DSH Desktop/logs/host/` on Linux):
 
 ```
-[empty-turn-guard] rewriting an empty stop (text=23ch) into EMPTY_RESPONSE
+[dsh-empty-turn-guard] empty-turn-guard: mounted (markup-only stops become EMPTY_RESPONSE retries)
 ```
 
-紧接着通常还能看到 `llm/retry` / `llm/retry-started` 事件——那就是重试在跑。
+And when a markup-only stop is actually caught:
 
----
-
-## 兼容性
-
-- 需要 DSH `0.2.0-rc.2`（本插件在这一版上验证通过）。
-- 依赖的事件 `llm/stream`、错误码 `EMPTY_RESPONSE` 都是 DSH 既有能力，不修改 DSH 任何文件。
-- Node.js >= 22。
-
-## 非目标（它不做什么）
-
-- **不修中转站**：残渣还会出现在正文里，只是不会再"假装完成"。
-- **不清洗历史消息**：已经落盘的怪标记不会被动。
-- **不管 `max-tokens` 退化刷屏**：那种情况 DSH 会显示成可见的 `max-tokens` 结果，不属于本插件范围。
-- **不保证重试一定成功**：如果中转持续只吐残渣，重试会耗尽，然后给出明确报错——这仍然比静默半截好。
-
-## 卸载
-
-```bash
-dsh plugin --profile <你的profile> remove dsh-empty-turn-guard
+```
+[dsh-empty-turn-guard] rewriting an empty stop (text=24ch) into EMPTY_RESPONSE
 ```
 
-或者去 **设置 → 内置插件 →「空回合守卫」** 把开关关掉。
+An `llm/retry` / `llm/retry-started` event usually follows — that is the retry
+running.
 
-## 目录结构
+## How it works
+
+```
+LLM call
+  └─ llm/stream  ◀── this plugin wraps here (global, prepended)
+     └─ adapter stream (openai-responses | anthropic-messages)
+        └─ chunks: block-start / text-delta / block-end / usage / finish
+
+on finish:
+  reason.kind === "stop"
+    AND no tool call observed
+    AND stripMarkup(text) === ""        ⇒  rewrite to error EMPTY_RESPONSE
+  otherwise                             ⇒  yield the chunk untouched
+
+error EMPTY_RESPONSE
+  └─ @deepseek-ai/dsh-llm-retry: in DEFAULT_RETRYABLE_CODES
+     └─ retries the step (5 attempts, 500 ms initial, 10 s cap, 10 % jitter)
+```
+
+`llm/stream` is the single funnel every model call passes through, and the
+waterfall lets a listener wrap the provider's chunk stream instead of reacting
+after the fact. Rewriting the `finish` chunk — rather than editing text or
+injecting a message — keeps the conversation history clean and reuses the retry
+machinery the provider already declares.
+
+Two filters keep the interception narrow. Requests that declare no tools are
+skipped, because background calls (session titles, compaction) stream the same
+way and an empty reply there is expected. `max-tokens` is skipped because a
+truncated answer is a genuine answer.
+
+The failure this targets, the measurements behind it, and why switching protocol
+does not help are documented in **[docs/root-cause.md](docs/root-cause.md)**.
+
+## Compatibility
+
+- **DSH `0.2.0-rc.2`** (verified on this release).
+- **Node.js >= 22.**
+- Uses only existing seams: the `llm/stream` waterfall and the `EMPTY_RESPONSE`
+  error code. No DSH file is modified.
+- `@deepseek-ai/schemastery` is a **peer dependency** supplied by DSH.
+- The schema keeps a `.volatile()` field on purpose. `@deepseek-ai/dsh-settings`
+  drops any namespace whose schema has none — silently — and the settings card
+  would vanish. See the note at the end of
+  [docs/root-cause.md](docs/root-cause.md).
+
+## Non-goals
+
+- **Does not repair the relay.** The markup still reaches the message body; it
+  just no longer pretends to be a finished turn.
+- **Does not sanitise history.** Messages already on disk keep their residue.
+- **Does not handle degenerate repetition.** A reply that loops until
+  `max-tokens` already shows up as its own visible outcome.
+- **Does not guarantee the retry succeeds.** If the relay only ever returns
+  residue, the retries are exhausted and you get a clear error — still better
+  than a silent half-answer.
+
+## Development
+
+There is no build step. `lib/index.js` and `lib/client.js` are the shipped
+artifacts.
+
+```sh
+npm run check   # node --check on both entry points
+npm test        # node --test over tests/
+```
+
+`lib/client.js` is a hand-written ModuleLoader bundle because the browser runner
+loads it by evaluating `window.__ModuleLoader__.load({ id, factory })`. It may
+require only `react`, `react/jsx-runtime` and
+`@deepseek-ai/dsh-client-ui-primitives`. Do not introduce a bundler for it.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the review bar, and
+[SECURITY.md](SECURITY.md) for the plugin's security boundaries.
+
+## Repository Layout
 
 ```
 dsh-empty-turn-guard/
-├── lib/index.js         # 宿主半：llm/stream 拦截逻辑（零运行时依赖）
-├── lib/client.js        # 客户端半：设置页 / 插件面板里的那张带开关的卡片
-├── cordis.patch.yml     # bundle patch：把插件行挂进配置树
-├── package.json         # dsh.bundle.patch 指向上面那份 patch；dsh.client 指向客户端半
-├── README.md / README.en.md
+├── lib/index.js           # host half: the llm/stream guard (no runtime deps)
+├── lib/client.js          # browser half: the settings card + plugins card
+├── cordis.patch.yml       # bundle patch: mounts the plugin row
+├── package.json           # dsh.bundle.patch and dsh.client point at the above
+├── tests/                 # node:test suites for both halves
+│   ├── guard.test.mjs
+│   └── client-bundle.test.mjs
+├── docs/root-cause.md     # the failure this plugin targets, with evidence
+├── .github/workflows/     # CI: Node 22 + 24 on Linux and Windows
 ├── CHANGELOG.md
+├── CONTRIBUTING.md
+├── SECURITY.md
 └── LICENSE
 ```
 
-> `lib/client.js` 是**手写的浏览器 bundle**（`window.__ModuleLoader__.load(...)`），不需要构建工具；改完直接重启 DSH 即可。
-> 它只 `require` 三个东西：`react`、`react/jsx-runtime`、`@deepseek-ai/dsh-client-ui-primitives`。
+## Uninstall
 
-## 发布到 npm（本仓库维护者）
+```sh
+dsh plugin --profile <your-profile> remove dsh-empty-turn-guard
+```
 
-1. 改掉 `package.json` 里 `repository` / `homepage` / `bugs` 的 `CHANGE-ME`。
-2. `npm publish`。
-3. 别人就能用 `dsh plugin --profile <p> add dsh-empty-turn-guard` 装。
+Or turn the switch off in **Settings → Built-in plugins → Empty-turn guard**.
 
 ## License
 
-MIT
+[MIT](LICENSE)

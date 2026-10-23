@@ -1,12 +1,14 @@
 {
   "name": "dsh-empty-turn-guard",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "DSH 插件：把「只有协议标记、既没有正文也没有工具调用」的空回合改判成可重试的错误，避免模型回复输出一半就静默停住。A DSH plugin that turns a markup-only empty turn into a retryable EMPTY_RESPONSE error instead of a silently half-finished reply.",
   "keywords": [
     "dsh",
     "dsh-plugin",
-    "deepseek",
     "dsh-bundle",
+    "deepseek",
+    "deepseek-harness",
+    "cordis",
     "retry",
     "empty-response",
     "relay",
@@ -36,9 +38,12 @@
   },
   "files": [
     "lib",
+    "docs",
     "cordis.patch.yml",
     "README.md",
-    "README.en.md",
+    "README.zh-CN.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
     "CHANGELOG.md",
     "LICENSE"
   ],
@@ -46,15 +51,10 @@
     "node": ">=22"
   },
   "peerDependencies": {
-    "cordis": "^4.0.0-rc.10"
-  },
-  "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.4"
   },
-  "peerDependenciesMeta": {
-    "cordis": {
-      "optional": true
-    }
+  "devDependencies": {
+    "@deepseek-ai/schemastery": "^3.18.4"
   },
   "dsh": {
     "bundle": {
@@ -75,6 +75,7 @@
     }
   },
   "scripts": {
-    "check": "node --check lib/index.js && node --check lib/client.js"
+    "check": "node --check lib/index.js && node --check lib/client.js",
+    "test": "node --test"
   }
 }
