@@ -1,7 +1,7 @@
 {
   "name": "dsh-empty-turn-guard",
-  "version": "0.4.0",
-  "description": "DSH 插件：把「只有协议标记、既没有正文也没有工具调用」的空回合改判成可重试的错误，避免模型回复输出一半就静默停住。A DSH plugin that turns a markup-only empty turn into a retryable EMPTY_RESPONSE error instead of a silently half-finished reply.",
+  "version": "0.5.0",
+  "description": "DSH 插件：把「话说一半就停」的回合改判成可重试的错误——正文里漏出 DSML 工具调用标记、流式响应中途卡住不再出块、空 <thinking> 无限重复、整段回答被包在未闭合的推理块里，都在这里被识别并重试。A DSH plugin that turns half-finished turns (leaked tool-call markup, stalled streams, empty-thinking loops, leaked chains of thought) into retryable errors.",
   "keywords": [
     "dsh",
     "dsh-plugin",
@@ -12,6 +12,8 @@
     "retry",
     "empty-response",
     "relay",
+    "stream-timeout",
+    "tool-call-residue",
     "ai-agent"
   ],
   "homepage": "https://github.com/FYTXY/dsh-empty-turn-guard#readme",

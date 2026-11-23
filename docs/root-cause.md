@@ -147,31 +147,133 @@ immediately afterwards.
 
 One turn on this route degenerated differently: 61,513 characters ending in
 `max-tokens`, of which `</返璞归真>` repeated 5,117 times. That tag appears
-nowhere in the request — the model invented it and looped. This is a separate
-failure (a repetition trap), not the same bug, and this plugin deliberately does
-not touch it.
+nowhere in the request — the model invented it and looped. That one is a
+repetition trap that ends in `max-tokens`, so the guard still leaves it alone
+(truncation is a real answer). Its sibling is handled: see
+[the 255-pair flood](#the-255-pair-flood) below.
+
+## A wider sample: 0.5.0 measurements
+
+The numbers above came from 35 sessions of one route. Re-running the same
+extraction over **110 sessions / 11,946 assistant messages** (all routes, all
+projects on the machine) changed the picture in two ways.
+
+First, residue is far more common than "empty reply" suggests:
+
+| signal | count |
+| --- | --- |
+| messages whose text or reasoning carried `｜｜DSML｜｜` / `<thinking>` / `<返璞归真>` | 2,598 (21.7%) |
+| … that also contained a real tool call | 2,474 |
+| … that contained **no** tool call | 124 |
+
+Second — and this is the part that shapes the 0.5.0 judgements — of those 124
+messages with no tool call:
+
+| shape | count | verdict |
+| --- | --- | --- |
+| markup only, no prose at all | 18 | genuinely broken, already caught in 0.4.0 |
+| prose containing a whole abandoned tool call | 9 | genuinely broken, **missed by 0.4.0** |
+| text stuck inside an unclosed `<thinking>` | 19 (+1 where the tag itself is mangled) | mixed — see below |
+| ordinary prose | 77 | **must be preserved** |
+
+An earlier pass over a 130-message superset, counting by feature rather than by
+shape, found `｜｜DSML｜｜invoke` in 43 messages that were **correct answers**, plus
+9 with a bare `<parameter name=` and 1 with an escaped `:parameter&gt;`. Those two
+views disagree on totals because they bucket differently; the load-bearing fact
+they agree on is that a large fraction of markup-bearing messages are healthy.
+
+### Position, not presence
+
+What actually separates the broken ones is **where** the markup sits:
+
+- **tail-dangling** — the last thing in the message is a tag, with nothing but
+  punctuation after it. The cleanest example is the user-visible one, 159
+  characters: `<thinking> </thinking>\n发现两个 Orca 配置目录：…看 daemon.log。\n\n\n</｜｜DSML｜｜ invoke>\n</｜｜DSML｜｜ calls>`
+  — prose that stops mid-explanation, followed by the leftover envelope of a
+  tool call that never got its body.
+- **head-first** — the very first thing is a tag, before any prose at all, which
+  means the relay dropped the text and forwarded only the parameter block.
+- **unclosed call** — prose, then `<parameter name=…` and never a `</parameter>`;
+  the model started composing a call and the stream died inside the arguments.
+
+`HEAD_WINDOW` is 40 characters, and that number is load-bearing. The two widest
+head-first failures in the corpus put their first tag at offsets 65 and 71, while
+correct answers that quote a tag put theirs at 25 and 16. Windows of 80, 120 and
+300 were tried and every one of them started eating correct answers; 40 is the
+only width that separates the two populations on this corpus. It also means the
+65-offset sample is a known miss — widening the window to catch it costs more
+than it gains.
+
+### The 255-pair flood
+
+`session-36e33bf4-8cb8-4b18`, turn 3 step 3: 255 consecutive
+`<thinking> </thinking>` pairs, 6,120 characters, `stop`, no tool call. Under
+0.4.0 this was caught — but only after the model had spent the whole generation
+producing it. 0.5.0 interrupts the upstream stream at the 12th empty pair, so the
+step fails in a fraction of the time.
+
+### Where `thinkingLeak` is risky, and why it ships off
+
+One 2,089-character message is a **fully correct answer** welded into an unclosed
+`<thinking>` because the closing tag was lost. Its sibling failures are 15–164
+characters of a fragment (`<thinking>I should look at composeEntries`). Length is
+the only separator available, so the judgement is capped at 400 characters and
+ships disabled.
+
+### Regression against the real corpus
+
+`regress.mjs` replays every sample through the plugin's public `apply()`,
+mounting a stub context — no internal functions, so the measurement cannot drift
+from the ship. Of 128 samples:
+
+```
+pass -> pass            58   correct answers, all preserved
+pass -> TRANSPORT       23   all verified by hand as real failures
+fail -> EMPTY_RESPONSE  18   all real failures
+fail -> TRANSPORT        4   all real failures
+fail -> pass             6   correctly left alone
+review -> pass          18   correct answers, preserved
+review -> TRANSPORT      1   real failure
+```
+
+2 known misses out of 128, both understood: `len=51472` (residue at offset 65,
+outside `HEAD_WINDOW`) and `len=645` (no tag left in the tail window — only the
+command text remains). Zero false positives.
 
 ## What this plugin changes
 
 It intercepts the one funnel every call passes through — the `llm/stream`
-waterfall — and measures the attempt as it streams. When a `stop` arrives with no
-tool call and nothing beyond protocol markup and whitespace, it rewrites the
-finish reason into:
+waterfall — and measures the attempt as it streams. There are three judgements on
+the finished text and two on the stream itself.
+
+On a `stop` with no tool call observed:
 
 ```js
-{ kind: "error", failure: { code: "EMPTY_RESPONSE", message: "model returned a completed response with no usable content (protocol markup only)" } }
+// 1. nothing but markup
+{ kind: "error", failure: { code: "EMPTY_RESPONSE", message: "…no usable content (protocol markup only)" } }
+// 2/3. residue at the tail, head, or an unclosed parameter block
+{ kind: "error", failure: { code: "TRANSPORT", message: "…stops on protocol markup" } }
 ```
 
-`EMPTY_RESPONSE` is already in `DEFAULT_RETRYABLE_CODES` of `@deepseek-ai/dsh-llm`,
-so `@deepseek-ai/dsh-llm-retry` retries the step with backoff (5 attempts, 500 ms
-initial delay, 10 s cap, 10% jitter) instead of ending the turn on nothing.
+While streaming: no chunk for 90 s ⇒ `TIMEOUT`; stream ends with no `finish` chunk
+⇒ `TRANSPORT`; 12 empty `<thinking> </thinking>` pairs with nothing else ⇒
+`EMPTY_RESPONSE`, interrupting the upstream iterator rather than draining it.
 
-Three conditions must hold together, which is what keeps ordinary replies safe:
-the finish is `stop`, no tool call was observed, and the text is empty once
-markup is removed. A one-word answer, a single `?`, or prose that merely mentions
-a tag all pass through untouched. `max-tokens` is left alone because a truncated
-answer is a real answer and already surfaces as its own visible outcome.
-Background calls that declare no tools (session titles, compaction) are skipped.
+All three codes are already in `DEFAULT_RETRYABLE_CODES` of `@deepseek-ai/dsh-llm`,
+so `@deepseek-ai/dsh-llm-retry` retries the step with backoff (5 attempts, 500 ms
+initial delay, 10 s cap, 10% jitter) instead of ending the turn on nothing. A
+custom code would never be retried, which is why the new judgements reuse these
+three rather than inventing names.
+
+What keeps ordinary replies safe: the finish must be `stop`, no tool call may
+have been observed, and each judgement looks at a **position** (last 400
+characters, first 40 characters, an unclosed `<parameter>` with more than 80
+characters of body after it) rather than at the mere presence of a tag. A
+one-word answer, a single `?`, prose that mentions a tag, and a correctly closed
+parameter block quoted in a code fence all pass through untouched. `max-tokens`
+is left alone because a truncated answer is a real answer and already surfaces as
+its own visible outcome. Background calls that declare no tools (session titles,
+compaction) are skipped.
 
 ## Why the switch is volatile
 
@@ -216,5 +318,6 @@ switch take effect without remounting.
    removing the translating relay from the path.
 
 This plugin is a client-side mitigation for installs that cannot change 1 or 3
-yet. It does not repair the relay, does not strip markup from delivered text, and
-does not detect degenerate repetition.
+yet. It does not repair the relay, does not strip markup from delivered text,
+does not parse the markup back into a tool call, and does not catch every
+residue position.
