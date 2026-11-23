@@ -256,10 +256,18 @@ test('a stream that goes idle is rewritten as TIMEOUT', async (t) => {
   process.env.DSH_EMPTY_TURN_GUARD_IDLE_MS = '20'
 
   const { handler } = mount({})
+  // The upstream stalls on a real timer rather than on `await new Promise(() => {})`.
+  // A promise that never settles keeps no handle on the loop, so the run would
+  // depend on Node's unref/pending-promise semantics instead of on the guard's
+  // own deadline (this is what made the whole file fail on Node 22 in CI).
+  let hangTimer
   const stalled = async function* () {
     yield textDelta('开始思考')
-    await new Promise(() => {})
+    await new Promise((resolve) => {
+      hangTimer = setTimeout(resolve, 60_000)
+    })
   }
+  t.after(() => clearTimeout(hangTimer))
   const out = []
   for await (const chunk of handler.fn({ tools: [{}] }, () => stalled())) out.push(chunk)
 
