@@ -1,7 +1,7 @@
 {
   "name": "dsh-empty-turn-guard",
-  "version": "0.5.0",
-  "description": "DSH 插件：把「话说一半就停」的回合改判成可重试的错误——正文里漏出 DSML 工具调用标记、流式响应中途卡住不再出块、空 <thinking> 无限重复、整段回答被包在未闭合的推理块里，都在这里被识别并重试。A DSH plugin that turns half-finished turns (leaked tool-call markup, stalled streams, empty-thinking loops, leaked chains of thought) into retryable errors.",
+  "version": "0.6.0",
+  "description": "DSH 插件：把「话说一半就停」的回合改判成可重试的错误——正文里漏出 DSML 工具调用标记、流式响应中途卡住不再出块、空 <thinking> 无限重复、整段回答被包在未闭合的推理块里、宣告了下一步却什么都没调用就收尾，都在这里被识别并重试。A DSH plugin that turns half-finished turns (leaked tool-call markup, stalled streams, empty-thinking loops, leaked chains of thought, announced-but-never-made tool calls) into retryable errors.",
   "keywords": [
     "dsh",
     "dsh-plugin",
@@ -14,6 +14,7 @@
     "relay",
     "stream-timeout",
     "tool-call-residue",
+    "narration",
     "ai-agent"
   ],
   "homepage": "https://github.com/FYTXY/dsh-empty-turn-guard#readme",

@@ -23,6 +23,11 @@ without touching any DSH file.
   emits only the parameter block, the reply never starts being an answer.
 - **Catches the call that never closes.** Prose, then `<parameter name=…` with no
   `</parameter>`: the model began composing a call and the stream ended inside it.
+- **Catches the announcement with nothing behind it.** Six tool calls run, then the
+  reply says what it is about to do — "读 L4320-4429 区间和 L2667 附近（main）。",
+  "Let me run it." — and ends the turn. Nothing ran and nothing failed, so the step
+  is recorded as completed. The relay swallowed the call block; judged from the
+  final line only, and only in a reply long enough to have been building to it.
 - **Catches a stalled stream.** No chunk for 90 s becomes `TIMEOUT`; a stream that
   ends without a `finish` chunk becomes `TRANSPORT`. Text that already arrived is
   still delivered to the transcript.
@@ -34,7 +39,7 @@ without touching any DSH file.
   residue-bearing messages were correct answers that **quote** the markup while
   explaining the bug. All of them pass untouched, including a 1 750-character
   report and a 2 089-character answer wrapped in an unclosed `<thinking>`.
-- **Five switches, no numbers.** Master switch plus one per judgement; the
+- **Six switches, no numbers.** Master switch plus one per judgement; the
   thresholds are constants so a settings page can never be tuned into false
   positives.
 - **No dependencies at runtime.** Host half imports only a schema library; the
@@ -56,7 +61,7 @@ dsh plugin --profile <your-profile> add dsh-empty-turn-guard
 ```
 
 `dsh plugin … add` forwards its arguments to pnpm, so GitHub shorthands, tags and
-branches work too (`github:FYTXY/dsh-empty-turn-guard#v0.5.0`).
+branches work too (`github:FYTXY/dsh-empty-turn-guard#v0.6.0`).
 
 Restart DSH, then open **Settings → Built-in plugins → Empty-turn guard** and
 turn the switch on.
@@ -89,7 +94,7 @@ A GitHub install handles this through pnpm and needs no extra step.
 
 ## Configuration
 
-### 1. The five switches
+### 1. The six switches
 
 All of them live in the plugin's own tab under **Settings → Built-in plugins →
 Empty-turn guard**, and the master switch is also on the bundle's card in the
@@ -101,12 +106,13 @@ number field invites tuning into false positives.
 | --- | --- | --- |
 | `enabled` | on | Master switch. Off = unload the guard entirely. |
 | `toolCallResidue` | on | The reply ends in markup, opens with markup, or walks into a `<parameter>` block it never closes. |
+| `narrationStop` | on | The reply ends on a bare one-clause announcement of the next call ("读 L4320-4429 区间和 L2667 附近（main）。", "Let me run it.") and then stops, so nothing ran. Only the last line is read, and only when the reply spent at least 100 characters getting there. |
 | `streamStall` | on | No chunk for 90 s (`TIMEOUT`), or the stream ends without a `finish` chunk (`TRANSPORT`). |
 | `repetition` | on | Twelve empty `<thinking> </thinking>` pairs with nothing else in the text. Aborts early instead of waiting for the loop to end. |
 | `thinkingLeak` | **off** | A short reply (≤ 400 characters of prose) that is entirely inside an unclosed `<thinking>`. Off by default: real samples exist where a complete, correct answer lost its closing tag, and only length separates the two. |
 
 Turning `enabled` off unloads the plugin and restores the untouched `llm/stream`
-chain, which brings the silent half-turn back. The other four are judged per
+chain, which brings the silent half-turn back. The other five are judged per
 request, so flipping them applies to the next model call with no restart.
 
 Both entry points write the same value — the package's entry in the profile's
@@ -114,7 +120,7 @@ Both entry points write the same value — the package's entry in the profile's
 
 | Entry point | What it shows |
 | --- | --- |
-| Settings → Built-in plugins → **Empty-turn guard** | The plugin's own tab: all five switches, what they currently do, and save / discard |
+| Settings → Built-in plugins → **Empty-turn guard** | The plugin's own tab: all six switches, what they currently do, and save / discard |
 | Sidebar → **Plugins** panel | The master switch on the bundle's card |
 
 The row-level toggle for this plugin's row is greyed out on the Plugins panel.
@@ -151,6 +157,7 @@ length, and the error code it became:
 ```
 [dsh-empty-turn-guard] rewriting a markup-only stop (text=24ch) into EMPTY_RESPONSE
 [dsh-empty-turn-guard] rewriting a tool-call-residue stop (text=159ch) into TRANSPORT
+[dsh-empty-turn-guard] rewriting a narration-only stop (text=270ch) into TRANSPORT
 [dsh-empty-turn-guard] rewriting a stream-stalled attempt (no chunk for 90000ms) into TIMEOUT
 [dsh-empty-turn-guard] rewriting a stream-truncated attempt (no finish chunk) into TRANSPORT
 ```
@@ -178,6 +185,7 @@ on finish:
     endsInResidue(text)                     ⇒  error TRANSPORT        (hangs on markup)
     startsInResidue(text)                   ⇒  error TRANSPORT        (opens on markup)
     hasUnclosedCall(text)                   ⇒  error TRANSPORT        (never closes it)
+    narrationStop && endsInNarration(text)  ⇒  error TRANSPORT        (announced, never called)
     thinkingLeak && isThinkingLeak(…)       ⇒  error EMPTY_RESPONSE   (opt-in)
   otherwise                                 ⇒  yield the chunk untouched
 
@@ -205,6 +213,17 @@ closed (`hasUnclosedCall`).
 The `HEAD_WINDOW = 40` constant is load-bearing: measured false positives appear
 at 80, 120 and 300, because the quoted markers in a real answer sit 65–71
 characters in.
+
+**The announcement rule reads one line.** `endsInNarration` looks only at the
+last non-empty line, and accepts it only if it is a single short clause: at most
+60 characters, opened by an action verb, with no comma or semicolon, and no
+"shall I / do you want me to / 要不要我" turn-taking. A reply shorter than 100
+characters is never judged this way, because "先读一下配置。" is indistinguishable
+from a legitimate short answer, while every measured failure spends 143
+characters or more on prose before the final line. Two known shapes are missed by
+design — a two-clause announcement ("然后读 A，再读 B。") and one that carries a
+comma — because widening the rule to reach them starts catching genuine
+explanatory closings.
 
 Two filters keep the interception narrow. Requests that declare no tools are
 skipped, because background calls (session titles, compaction) stream the same
@@ -239,7 +258,7 @@ does not help are documented in **[docs/root-cause.md](docs/root-cause.md)**.
   than a retry.
 - **Does not sanitise history.** Messages already on disk keep their residue.
 - **Does not catch every residue position.** Residue that sits between the 40th
-  and 400th character, with prose on both sides, still passes (2 of 128 measured
+  and 400th character, with prose on both sides, still passes (2 of 139 measured
   samples). Widening the window starts eating correct answers instead — the
   trade-off is documented in `docs/root-cause.md`.
 - **Does not guarantee the retry succeeds.** If the relay only ever returns

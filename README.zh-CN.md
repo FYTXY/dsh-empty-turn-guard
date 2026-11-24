@@ -11,10 +11,11 @@
 - **拦住"话说一半"的那一轮。** 实测 11 946 条 assistant 消息后发现，最常见的形态并不是"回复为空"，而是正文写着写着停住，后面跟着 `</｜｜DSML｜｜ invoke>` / `</｜｜DSML｜｜ calls>` —— 这正是用户看到的"输出一半卡死"。现在会被识别并重试。
 - **拦住"一开口就是标记"的回答。** 中转服务把正文丢了、只吐出参数块时，这条回复从头就不是回答。
 - **拦住"调用永远没闭合"。** 先讲人话，接着 `<parameter name=…` 却始终没有 `</parameter>`：模型开始拼工具调用，流就在参数里断了。
+- **拦住"只说不做"的宣告。** 六步工具调用都跑完了，最后一步只写一句"接下来要干什么"就停了——「读 L4320-4429 区间和 L2667 附近（main）。」、「Let me run it.」。工具没调用、也没报错，这一轮被记成正常完成，而中转服务把调用块整个吞掉了。判据只看最后一行，而且要求这条回复至少已经写了 100 字符。
 - **拦住卡死的流。** 90 秒没有新分块 → `TIMEOUT`；流结束了却没有 `finish` 分块 → `TRANSPORT`。已经到达的正文照常交付，不会丢。
 - **刷屏当场掐断。** 出现 12 对空的 `<thinking> </thinking>` 且没有其他内容时立刻中断上游流，不必等它自己生成完——实测最坏的一次吐了 255 对才结束。
 - **按位置判定，所以不会吞掉真回答。** 判据看的是标记**长在哪里**，而不是有没有标记：实测 130 条含残渣的消息里，有 43 条是**正确回答**——模型在解释这个 bug 时把标记原文引用了出来。这些全部原样放行，包括一条 1 750 字的报告和一条整段包在未闭合 `<thinking>` 里的 2 089 字正确回答。
-- **五个开关，不暴露数字。** 一个总开关加每个判据一个；阈值写死成常量，免得设置页里一个数字就被调成误伤。
+- **六个开关，不暴露数字。** 一个总开关加每个判据一个；阈值写死成常量，免得设置页里一个数字就被调成误伤。
 - **零运行时依赖。** 宿主半只引一个 schema 库；浏览器半是手写 bundle，不需要构建工具。
 - **日志只记长度，不记内容。** 诊断信息里是 `text=24ch`，模型输出不会经本插件写进日志文件。
 
@@ -31,7 +32,7 @@ dsh plugin --profile <你的profile> add link:<本目录绝对路径>
 dsh plugin --profile <你的profile> add dsh-empty-turn-guard
 ```
 
-`dsh plugin … add` 会把参数转给 pnpm，所以 GitHub 简写、tag、分支都能用（例如 `github:FYTXY/dsh-empty-turn-guard#v0.5.0`）。
+`dsh plugin … add` 会把参数转给 pnpm，所以 GitHub 简写、tag、分支都能用（例如 `github:FYTXY/dsh-empty-turn-guard#v0.6.0`）。
 
 装完重启 DSH，进 **设置 → 内置插件 →「空回合守卫」**，把开关打开。
 
@@ -58,7 +59,7 @@ New-Item -ItemType Junction -Path ".\node_modules\@deepseek-ai\schemastery" `
 
 ## 配置
 
-### 1. 五个开关
+### 1. 六个开关
 
 都在 **设置 → 内置插件 →「空回合守卫」** 这个 tab 里；总开关同时也在侧边栏 **「插件」** 面板的 bundle 卡片上。阈值不暴露——它们是 `lib/index.js` 里的常量，因为每一个都是从实测样本里选出来的，留个数字输入框只会让人把它调成误伤。
 
@@ -66,17 +67,18 @@ New-Item -ItemType Junction -Path ".\node_modules\@deepseek-ai\schemastery" `
 | --- | --- | --- |
 | `enabled` | 开 | 总开关。关掉 = 整个守卫卸载。 |
 | `toolCallResidue` | 开 | 回复以标记结尾、以标记开头，或者走进一个永远没闭合的 `<parameter>` 块。 |
+| `narrationStop` | 开 | 回复以一句短宣告结束——「读 L4320-4429 区间和 L2667 附近（main）。」、「Let me run it.」——然后就没有了，工具没调用。只看最后一行，且要求这条回复至少已写满 100 字符。 |
 | `streamStall` | 开 | 90 秒没有新分块（`TIMEOUT`），或流结束却没有 `finish` 分块（`TRANSPORT`）。 |
 | `repetition` | 开 | 12 对空的 `<thinking> </thinking>` 且正文空无一物。当场掐断，不等它循环完。 |
 | `thinkingLeak` | **关** | 短回复（去掉标记后 ≤ 400 字符）整段待在一个未闭合的 `<thinking>` 里。默认关：实测有一条完整正确的回答只是丢了闭合标签，两者只能靠长度区分。 |
 
-关掉 `enabled` 会卸载插件、`llm/stream` 恢复原样（半截回答又会静默完成）。其余四个是逐请求判定，拨完对下一次模型调用就生效，无需重启。
+关掉 `enabled` 会卸载插件、`llm/stream` 恢复原样（半截回答又会静默完成）。其余五个是逐请求判定，拨完对下一次模型调用就生效，无需重启。
 
 两个入口改的是同一件事（profile `package.json` 里 `dsh.profile.bundles` 的这一项），用哪个都行：
 
 | 入口 | 展示内容 |
 | --- | --- |
-| 设置 → 内置插件 → **「空回合守卫」** | 插件自己的配置页：五个开关、当前状态说明、保存 / 丢弃 |
+| 设置 → 内置插件 → **「空回合守卫」** | 插件自己的配置页：六个开关、当前状态说明、保存 / 丢弃 |
 | 侧边栏 → **「插件」** 面板 | bundle 卡片上的总开关 |
 
 插件面板里本插件那一**行**的开关是灰色的，这是正常的：DSH 只允许通过 profile 自己的 patch 文件启停"行"，而本插件的行来自包自带的 `cordis.patch.yml`，所以行开关锁定——真正生效的是**包的开关**。
@@ -107,6 +109,7 @@ New-Item -ItemType Junction -Path ".\node_modules\@deepseek-ai\schemastery" `
 ```
 [dsh-empty-turn-guard] rewriting a markup-only stop (text=24ch) into EMPTY_RESPONSE
 [dsh-empty-turn-guard] rewriting a tool-call-residue stop (text=159ch) into TRANSPORT
+[dsh-empty-turn-guard] rewriting a narration-only stop (text=270ch) into TRANSPORT
 [dsh-empty-turn-guard] rewriting a stream-stalled attempt (no chunk for 90000ms) into TIMEOUT
 [dsh-empty-turn-guard] rewriting a stream-truncated attempt (no finish chunk) into TRANSPORT
 ```
@@ -133,6 +136,7 @@ LLM 调用
     endsInResidue(正文)                   ⇒  error TRANSPORT        （停在标记上）
     startsInResidue(正文)                 ⇒  error TRANSPORT        （开口就是标记）
     hasUnclosedCall(正文)                 ⇒  error TRANSPORT        （调用没闭合）
+    narrationStop 开 && endsInNarration(正文) ⇒  error TRANSPORT      （只说不做）
     thinkingLeak 开 && isThinkingLeak(…)  ⇒  error EMPTY_RESPONSE   （可选）
   否则                                    ⇒  原样放行
 
@@ -146,6 +150,8 @@ error
 **看位置，不看有无。** 整个设计围绕一个实测事实：130 条含残渣的回复里，43 条是**正确回答**——模型在解释这个 bug 时把标记引用了一遍。所以"有标记"什么也证明不了。真正的分界是：最后一个标记之后再没有正文（`endsInResidue`）、或者开头 40 字符里第一个标记之前没有正文（`startsInResidue`）、或者 `<parameter>` 块开了却始终没闭合（`hasUnclosedCall`）。
 
 `HEAD_WINDOW = 40` 这个常量是关键：实测把窗口放到 80 / 120 / 300 都会误伤，因为正确回答里被引用的标记落在第 65–71 字符处。
+
+**「只说不做」这条只读一行。** `endsInNarration` 只看最后一个非空行，并且要同时满足：不超过 60 字符、以动作动词开头、不含逗号或分号、不含「要不要我 / 需要我 / 吗」这类把决定交回给用户的语气。整条回复不足 100 字符时一律不判——「先读一下配置。」和正常的短回答无法区分，而实测每一条真失败都是先写了 143 字符以上的正文才落到最后那行。有两种形态是**刻意不抓**的：带逗号的两段宣告（「然后读 A，再读 B。」）和带逗号的单句；因为把判据放宽到能抓它们，就会开始咬正常的解释性收尾。
 
 两个过滤条件让拦截保持克制：没有声明 `tools` 的请求直接跳过（标题生成、压缩这类后台调用走同一条流，空回复是正常的）；`max-tokens` 跳过（截断是真实回答）。
 
@@ -166,7 +172,7 @@ error
 - **不修中转站**：残渣仍会出现在正文里，只是不再"假装完成"。
 - **不把残渣解析回工具调用**：这是刻意的——解析器一旦读错一个参数，就是执行了错误的命令，比重试一次更糟。
 - **不清洗历史消息**：已经落盘的怪标记不会被动。
-- **不覆盖所有残渣位置**：夹在第 40 到第 400 字符之间、两侧都有正文的残渣仍会放行（实测 128 条里漏 2 条）。把窗口放大反而会开始吃掉正确回答，这个取舍记在 `docs/root-cause.md` 里。
+- **不覆盖所有残渣位置**：夹在第 40 到第 400 字符之间、两侧都有正文的残渣仍会放行（实测 139 条里漏 2 条）。把窗口放大反而会开始吃掉正确回答，这个取舍记在 `docs/root-cause.md` 里。
 - **不保证重试一定成功**：如果中转持续只吐残渣，重试会耗尽并给出明确报错——仍好过静默半截。
 
 ## 开发

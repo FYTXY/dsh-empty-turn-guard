@@ -240,10 +240,89 @@ review -> TRANSPORT      1   real failure
 outside `HEAD_WINDOW`) and `len=645` (no tag left in the tail window — only the
 command text remains). Zero false positives.
 
+## A third failure shape: the call is swallowed, not mangled
+
+Everything above is one family: the markup reaches the client. 0.6.0 came from a
+screenshot that had **no markup in it at all** — a lone line, "读 L4320-4429 区间和
+L2667 附近（main）。", and a `继续` button.
+
+The session is `--D-WORKSPACE.SUN-subagent--/session-43af9a73-…`, turn 53:
+
+```
+step 1..6   blocks = reasoning + text + tool-call   tools = 1   stopReason = "toolUse"
+step 7      blocks = reasoning + text               tools = 0   stopReason = "stop"     ← the screenshot
+turn/end    reason = {"kind": "completed"}
+```
+
+Step 7's 270 characters explain the situation: the relay kept the final
+`<｜｜DSML｜｜tool_calls>` block **out of the transcript entirely**. What survived is
+the sentence that introduced it, followed by the three blank lines where the block
+should have been. No residue exists, so the position judgements of 0.5.0 all
+passed it through — replayed through `apply()`, `step 7` keeps
+`{"kind":"stop"}` and logs nothing.
+
+This shape is invisible to every check that looks for leftover markup. The only
+evidence left is **structural**: the model spent six steps calling tools, then
+ended the turn on a sentence that announces the seventh call and never made it.
+
+### What the corpus says
+
+115 sessions, 525 turns, **381 steps** that called a tool earlier in the same turn
+and then finished on text alone. The overwhelming majority are legitimate — asking
+whether to go on, closing out, reporting a decision. Splitting by reply length:
+49 under 400 characters, 120 between 400 and 1,500, 211 at 1,500 or more. Only
+1 + 10 + 33 of them end in a question mark.
+
+Filtering for "the last non-empty line is a bare announcement of an action" gives
+**10 real failures and zero false positives**, including `Let me run it.`,
+`Run both.`, `写测试。`, `先改 withTimeout。`, `先看进程启动时间。`,
+`确认后我就开始写。` and the screenshot's own line. All ten share a second
+property: each wrote at least 143 characters of prose before the last line.
+Every false positive found while tuning was short — `先读一下配置。` is 7
+characters — which is why the judgement requires the reply to be at least 100
+characters long before the last line is even read.
+
+### Why `endsInNarration` reads exactly one line
+
+`NARRATION_MAX_LINE = 60`, an action verb at the start, no comma or semicolon, no
+`HANDS_BACK` phrasing ("要不要我 / 需要我 / 吗"), and the 100-character floor. Two
+shapes are deliberately missed: two-clause announcements ("然后读 A，再读 B。")
+and single clauses that contain a comma. Every attempt to widen the rule far
+enough to catch those started catching normal explanatory endings, which is a
+worse trade than a miss — a miss costs one `继续` click, a false positive throws
+away a correct answer.
+
+### A false positive this shipped with, and the fix
+
+The first build flagged a **1,625-character correct answer** (`t1/s138`) that
+discusses the `thinkingLeak` design and quotes `` `<parameter name=…` `` inside a
+table cell without ever closing it. `hasUnclosedCall` counted openers minus
+closers, saw zero closers, and treated the remaining 1,197 characters of prose as
+an unclosed parameter body.
+
+The fix keeps the judgement but requires the body to still *look like* a
+parameter body: if a sentence-ending punctuation mark (`。！？`) or a blank line
+appears after the last opener, prose has resumed and the call did not break off
+mid-write. Compared against 12 candidate samples, this changed exactly one verdict
+(true → false) and dropped no real residue.
+
+### Regression, 0.6.0
+
+```
+regress-narration.mjs   392 abandoned-loop samples  -> 56 rewritten, 0 false positives
+regress.mjs             139 residue samples         -> 0 false positives, 2 known misses
+
+The corpus grows as sessions accumulate: the 0.5.0 run above saw 128 residue
+samples and an earlier narration run saw 387 abandoned loops. The extra samples
+landed in the same buckets, so both verdicts are unchanged.
+```
+
+`node --test`: 91 tests, all passing (up from 71).
+
 ## What this plugin changes
 
 It intercepts the one funnel every call passes through — the `llm/stream`
-waterfall — and measures the attempt as it streams. There are three judgements on
+waterfall — and measures the attempt as it streams. There are four judgements on
 the finished text and two on the stream itself.
 
 On a `stop` with no tool call observed:
@@ -253,6 +332,8 @@ On a `stop` with no tool call observed:
 { kind: "error", failure: { code: "EMPTY_RESPONSE", message: "…no usable content (protocol markup only)" } }
 // 2/3. residue at the tail, head, or an unclosed parameter block
 { kind: "error", failure: { code: "TRANSPORT", message: "…stops on protocol markup" } }
+// 4. the reply ends on a bare announcement of a call that was never made
+{ kind: "error", failure: { code: "TRANSPORT", message: "…announced the next tool call and then ended the turn" } }
 ```
 
 While streaming: no chunk for 90 s ⇒ `TIMEOUT`; stream ends with no `finish` chunk
@@ -273,7 +354,9 @@ one-word answer, a single `?`, prose that mentions a tag, and a correctly closed
 parameter block quoted in a code fence all pass through untouched. `max-tokens`
 is left alone because a truncated answer is a real answer and already surfaces as
 its own visible outcome. Background calls that declare no tools (session titles,
-compaction) are skipped.
+compaction) are skipped. The announcement judgement only reads the **last line**,
+and only in a reply that already spent 100 characters getting there, so an answer
+that offers to continue, closes out, or answers in one word is untouched.
 
 ## Why the switch is volatile
 

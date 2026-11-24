@@ -194,6 +194,72 @@ test('an answer that merely quotes the residue is left alone', async (t) => {
       'a quoted parameter block that is properly closed',
       '工具调用本该长这样：\n\n```\n<parameter name="command">git status --short</parameter>\n```\n\n而实际吐出来的是乱码标记。',
     ],
+    [
+      // Measured false positive: a table row quotes `<parameter name=…`, and prose
+      // keeps going for another 1 197 characters. The body is not parameter-shaped.
+      'a quoted parameter marker with prose continuing inside its body',
+      '改完这一轮的状态：`lib/index.js`（+506 行）、`lib/client.js`（五个开关，中英双语）、`tests/guard.test.mjs`（47→71 项）。\n\n' +
+        '| 判据 | 触发条件 | 错误码 |\n| --- | --- | --- |\n| `tool-call-residue` | 正文后拖着 `<parameter name=…` 却永不闭合 | `TRANSPORT` |\n| `stream-stall` | 90 秒没有新分块 | `TIMEOUT` |\n\n' +
+        '长度是唯一能用的分界，所以上限 400 字并且默认不启用。',
+    ],
+  ]
+
+  for (const [label, text] of cases) {
+    await t.test(label, async () => {
+      const chunks = [textBlock(text), stop]
+      assertPassthrough(chunks, await collect(handler, chunks), 'stop', label)
+    })
+  }
+})
+
+test('a reply that stops right after announcing the next call is rewritten', async (t) => {
+  const { handler } = mount({})
+
+  // Measured: six tool calls run, then step seven says what it is about to do and
+  // ends the turn. The relay swallowed the call block, so nothing ran and nothing
+  // failed — the reply just reads as if it were cut off.
+  const lead = '刚才那几步已经把该看的都看完了，结论写在这里：`sidebar.panellist` 就是侧栏面板列表，' +
+    '`main` 是主区域条目，两者的 cardinality 都是 list，scope 都是 app。剩下的只是确认 props。\n\n'
+
+  const cases = [
+    [
+      'the reported "仅剩一句宣告" reply',
+      '<thinking> </thinking>\n\n<thinking> </thinking>\n拿到完整 sidebar slot 清单了。关键的是 `sidebar.panellist`（L4320）—— 侧栏面板列表。\n\n现在读 catalog 里 `sidebar.panellist` 和 `main` 的完整条目，确认 cardinality / scope / props。\n\n读 L4320-4429 区间和 L2667 附近（main）。\n\n\n',
+    ],
+    ['a short English announcement', `${lead}Let me run it.`],
+    ['a short Chinese announcement', `${lead}写测试。`],
+    ['an announcement with a verb qualifier', `${lead}先改 withTimeout。`],
+    ['announcing two things to run', `${lead}Run both.`],
+    ['a one-clause plan', `${lead}先看进程启动时间。`],
+    ['an announcement with a lead-in', `${lead}确认后我就开始写。`],
+    [
+      'an announcement that only the last line carries',
+      '刚才那两处已经改好了，测试也跑过了：71 项全绿，剩下的文档和版本号下一轮一起收。' +
+        '这一轮改动落在 lib/index.js 与 lib/client.js 两个文件上，没有碰测试之外的东西。\n\nLet me run the checks.',
+    ],
+  ]
+
+  for (const [label, text] of cases) {
+    await t.test(label, async () => {
+      assertRewritten((await collect(handler, [textBlock(text), stop])).at(-1), 'TRANSPORT', label)
+    })
+  }
+})
+
+test('an answer that offers to continue is not mistaken for an announcement', async (t) => {
+  const { handler } = mount({})
+
+  // Every one of these ends a real answer the way a real answer ends: it closes
+  // the thought, or it hands the decision back to the user.
+  const cases = [
+    ['handing the choice back', '要我接着做第 3 项吗？'],
+    ['asking whether to commit a doc', '需要我把这套写进 AGENTS.md 吗？'],
+    ['telling the user to report back', '操作完告诉我一声，我读结果。'],
+    ['a sentence explaining where the change lives', '改动在 `lib/index.js` 里，重启后生效。'],
+    ['acknowledging an instruction', 'ACK'],
+    ['stopping on purpose', 'Stopping here as the card instructs.'],
+    ['a closing summary', '以上是这一轮的结论。'],
+    ['a long closing paragraph', '三处都改完了，测试 71 项全绿，剩下文档和版本号下一轮一起收。'],
   ]
 
   for (const [label, text] of cases) {
@@ -409,6 +475,14 @@ test('each judgement can be switched off on its own', async (t) => {
     const chunks = [textBlock('先读一下配置。')]
     const out = await collect(handler, chunks)
     assert.deepEqual(out, chunks, 'the stream simply ends as it did upstream')
+  })
+
+  await t.test('narrationStop off lets a bare announcement through', async () => {
+    const { handler } = mount({ narrationStop: false })
+    const prose = '六步工具调用都跑完了，slot 清单、catalog 条目、cardinality 与 scope 全部核对一致，' +
+      '只差把 props 读完就能给出结论。\n\n'
+    const chunks = [textBlock(`${prose}读 L4320-4429 区间。`), stop]
+    assertPassthrough(chunks, await collect(handler, chunks), 'stop', 'off')
   })
 
   await t.test('repetition off lets the loop finish on its own', async () => {
